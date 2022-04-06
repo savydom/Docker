@@ -1,0 +1,11 @@
+#!/bin/bash
+
+NAME="erlang"
+BASE_REPO=erlang
+VARIANTS=()
+
+# set to true when alpine images don't end up with debian commands
+INCLUDE_ALPINE=false
+
+# boilerplate
+source ../shared/images/generate.sh

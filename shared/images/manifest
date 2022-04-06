@@ -1,0 +1,125 @@
+#!/usr/bin/env python
+
+import json
+import subprocess
+
+DOCKERHUB_BASE = 'https://hub.docker.com/r/circleci/'
+GITHUB_BASE = 'https://github.com/circleci-public/circleci-bundles/'
+DOCKERHUB_ORG = 'circleci'
+
+def run(cmd):
+    result = subprocess.check_output(['/bin/bash', '-c', cmd])
+    return result.strip()
+
+def fetch_field(bundle, field):
+    return run('cd "%s"; source ./generate-images; echo ${%s}' % (bundle, field))
+
+def short_description(image):
+    return run("curl --silent --location --fail --retry 3 'https://hub.docker.com/v2/repositories/library/%s/' | jq -r .description" % (image))
+
+def language_description(name, image):
+    d = """
+CircleCI images for {0}.
+
+# Why
+
+Docker provides official images for popular languages and services that are aimed to work in common context, whether in development or in production.  CircleCI highly recommends using them for creating custom images that are more appropriate for users.
+
+However, we frequently found them lacking some tools making them appropriate for dev/CI use.  CircleCI publishes this image to extend the images in the following ways:
+
+1. Common tools used in development and CI are installed e.g. `git`, `ssh`, `tar`, `ca-certificates`, `curl`, `wget`.
+2. Docker tools: latest `docker`, `docker-compose`, and `dockerize` are installed
+3. Variants for common use cases, e.g. images with common browsers installed and configured to run in a containized environment
+4. Use a non-root user (namely `circleci`) by default.  Many applications refuse to run as root (e.g. `chrome`) or their behavior differs when run as root (e.g. `tar` file ownership behavior)
+
+Aiming to have CircleCI extended images ease adoption of Docker and CircleCI.  Once users are successful, we encourage users to build and customize their images to suite their individual project needs.
+
+# Notable Variants
+
+## `{1}:<version>`
+
+This is the defacto image. If you are unsure about what your needs are, you probably want to use this one for common tools.
+
+Sample Dockerfile
+
+## `{1}:<version>-browsers`
+
+This image makes browser testing easier.  It extends the defacto image and installs Firefox/geckodriver and Chrome/chromedriver and configure them to run in a containerized environment
+
+# User Feedback
+## Issues
+
+If you have any problems with or questions about this image, please contact us on [CircleCI Discuss Forum](https://discuss.circleci.com/c/circleci-2-0).
+""".format(name, image)
+    return d.strip()
+
+def service_description(name, image):
+    d = """
+Experimental CircleCI images for {0}.
+
+Extends the official image of [{0}](https://dockerhub.com/_/{1}) to be friendly to use in CircleCI for testing.
+
+# Experimental
+
+CircleCI is experimenting with this service image and we may change it in future in an incompatible way.  Users should consider building their own image or locking the image digest in CircleCI configuration files.
+
+# User Feedback
+
+## Issues
+
+If you have any problems with or questions about this image, please contact us on [CircleCI Discuss Forum](https://discuss.circleci.com/c/circleci-2-0).""".format(name, image)
+    return d.strip()
+
+def tags(bundle):
+    a = run("cd {}; find . -name 'Dockerfile' | sed 's|^\./images/||g' | sed 's|/Dockerfile||g' | sed 's|/|-|g' | sort".format(bundle))
+    return a.splitlines()
+
+def image_manifest(bundle):
+    """        "name": "Node.js",
+    "image": "circleci/node",
+    "info-url": "https://hub.docker.com/r/circleci/node/",
+    "bundle-path": "https://github.com/circleci-public/node-bundle",
+    "description": "Basic node, along with yarn and ....",
+    "tags": ["1.n.x","1.m.y","0.4"],
+    "tag-details": "...",
+    "variants": ["browsers"]
+    """
+
+    name = fetch_field(bundle, 'NAME')
+    image = fetch_field(bundle, 'BASE_REPO')
+    variants = fetch_field(bundle, 'VARIANTS[@]').split(' ')
+
+    description = language_description(name, image)
+    if 'browsers' not in variants:
+        description = service_description(name, image)
+
+    info = {
+        'name': name,
+        'image': DOCKERHUB_ORG + '/' + image,
+        'info-url': DOCKERHUB_BASE + image,
+        'bundle-path': GITHUB_BASE,
+        'type': 'language' if ('browsers' in variants) else 'service',
+        'short_description': short_description(image),
+        'variants': variants,
+        'description': description,
+        'tags': tags(bundle),
+    }
+    return info
+
+def manifest():
+    bundles = ['node', 'python', 'ruby', 'elixir', 'golang', 'clojure', 'php', 'openjdk', 'postgres', 'mariadb', 'mysql', 'mongo']
+    images = {}
+    for b in bundles:
+        images[b] = image_manifest(b)
+
+    variants = {
+        "browsers": "Includes browsers and libraries normally used for windowing",
+    }
+
+    return {'images': images, 'variants': variants}
+
+
+
+if __name__ == '__main__':
+    man = manifest()
+    print json.dumps(man, sort_keys=True, indent=4)

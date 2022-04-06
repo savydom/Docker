@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Helper file for creating a binary cache in S3 to avoid
+# hitting GitHub/VCS API rate limiting problems.
+
+set -exu
+
+function refresh_cache() {
+	NAME="$1"
+	URL="$2"
+
+	echo ">>> REFRESHING $NAME"
+	echo ''
+
+	TEMP_PATH="$(mktemp)"
+
+	curl --location --fail --retry 3 \
+		-o ${TEMP_PATH} \
+		"$URL"
+
+	echo "SHA256 of downloaded file was:"
+	sha256sum "${TEMP_PATH}" || true
+
+	aws s3 cp --acl public-read \
+		"${TEMP_PATH}" \
+		"s3://circle-downloads/circleci-images/cache/linux-amd64/${NAME}"
+
+	rm "${TEMP_PATH}"
+}
+
+
+# jq
+refresh_cache jq-latest \
+	$(curl --location --fail --retry 3 https://api.github.com/repos/stedolan/jq/releases/latest  | grep browser_download_url | grep '/jq-linux64"' | grep -o -e 'https.*jq-linux64')
+
+refresh_cache docker-compose-latest \
+	$(curl --location --fail --retry 3 https://api.github.com/repos/docker/compose/releases/latest | jq -r '.assets[] | select(.name == "docker-compose-Linux-x86_64") | .browser_download_url')
+
+refresh_cache dockerize-latest.tar.gz \
+	$(curl --location --fail --retry 3 https://api.github.com/repos/jwilder/dockerize/releases/latest | jq -r '.assets[] | select(.name | startswith("dockerize-linux-amd64")) | .browser_download_url')
+
+LATEST_PHANTOMJS_URL=$(curl --location --fail --retry 3  \
+	https://api.bitbucket.org/2.0/repositories/ariya/phantomjs/downloads | \
+	jq '[.values[].links.self.href]' | jq "map(select(contains(\"beta\") | not))" | \
+	jq "map(select(contains(\"x86_64\")))" | jq '.[0]' | \
+	sed 's/\"//g')
+
+refresh_cache phantomjs-latest.tar.bz2 \
+	${LATEST_PHANTOMJS_URL}
+
+# need to ignore Release candidate and milestone releases to get stable ones
+refresh_cache sbt-latest.tgz \
+	$(curl --location --fail --retry 3 https://api.github.com/repos/sbt/sbt/releases | grep browser_download_url | grep 'tgz"' | grep -o -e 'https.*.tgz' | grep -v -e '-RC' -e '-M' | head -n1)
